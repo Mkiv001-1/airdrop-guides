@@ -1,0 +1,27 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The x402 Discovery Gap: Why Listing Your API Is Not Enough (Measured 17 September 2026)</title>
+<meta name="description" content="We operate a 7-endpoint x402 seller API that accepts USDC on Base with no API keys, and we registered every route in the two public directories a sell">
+<meta name="keywords" content="x402, agents, research, monetization">
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#222}
+h1{font-size:1.6rem}h2{margin-top:2rem;font-size:1.2rem}.meta{color:#777;font-size:.85rem}
+a{color:#1a5fb4;text-decoration:none}</style></head>
+<body><article><h1>The x402 Discovery Gap: Why Listing Your API Is Not Enough (Measured 17 September 2026)</h1><p class='meta'>2026-09-17 · tags: x402, agents, research, monetization</p>
+<h2>What we measured</h2>
+<p>We operate a 7-endpoint x402 seller API that accepts USDC on Base with no API keys, and we registered every route in the two public directories a seller can self-serve: x402scan (wallet-proof SIWX flow; the registration call returned <em>registered:7, failed:0</em>) and x402 Arena. Both registrations succeeded. An independent discovery tool probed our origin and reported 7 paid routes with 0 errors.</p>
+<h2>The gap</h2>
+<p>On 17 September 2026 we queried the facilitator that settles our payments (PayAI) with our own receiving address: <em>GET facilitator.payai.network/discovery/resources?payTo=0xD4D1...</em>. It returned <em>items: [], total: 0</em>. Our address was not in the Bazaar catalogue at all, even though every one of our routes answers a correct HTTP 402 challenge with the bazaar extension attached.</p>
+<p>The independent aggregator x402all indexes 10,006 x402 resources; a search for our origin host returns nothing. x402-list.com, which currently ranks 301 services in the Data category alone, does not know us either.</p>
+<h2>Why: catalogues index settlements, not URLs</h2>
+<p>Per the x402 Bazaar specification, a facilitator catalogues a resource when it <em>processes a payment</em> that carries the bazaar extension and can confirm what was catalogued in the settlement response. Indexing is a side effect of a settlement. It is not a side effect of a well-formed 402 response, and not of a self-service listing.</p>
+<p>So a seller with zero paid calls is invisible in every facilitator-derived catalogue, no matter how correct its endpoints are. Our endpoints were validated by an independent discovery tool (7 routes, 0 errors) and accepted by the catalogues we registered with - and still absent downstream.</p>
+<h2>Registration is not always open either</h2>
+<p>x402all offers self-registration at x402all.com/register and promises machine registration at POST /api/register. That endpoint returned HTTP 404 on 17.09.2026: the form on their own page posts to a route that is not deployed yet, and their own copy says the JSON contract will live there &quot;once the endpoint is live&quot;. For that catalogue the only practical way in is a facilitator feed.</p>
+<h2>What this means if you sell agent APIs</h2>
+<p>1) Treat your first settled payment as the real listing event, not your first registration. 2) Prefer catalogues with a working self-serve registry (x402scan&apos;s SIWX flow works today) and keep the 402 challenge pristine. 3) Verify your own visibility instead of assuming it: query the facilitator with your receiving address. 4) Price where the volume is, not where the curation is.</p>
+<h2>Where the money actually is (same measurement)</h2>
+<p>Of 10,006 indexed resources the modal price is $0.01 (1,648 services), followed by $0.02 (1,336) and $0.001 (1,269); 20.6% of the catalogue charges $0.002 or less per call. Category counts: other 3,643 / data 2,862 / finance 2,383 / tools 551 / ai 275 / media 216 / compute 76. A separate 30-day read of x402scan shows the largest single seller moving $281K across 22.15M transactions - about $0.0013 per call on inference routing - while a stateless utility server billed 243,331 calls for $243 in total. Cheap, needed at runtime, no account required: that is the shape of demand.</p>
+<h2>Honest caveat</h2>
+<p>We have earned exactly $0 on our own API so far. This post is not a success story. It is a reproducible measurement of how agent-payment discovery actually behaves, published because we could not find it written down anywhere.</p>
+</article>
+<footer><p><a href="index.html">← All guides</a></p></footer></body></html>
