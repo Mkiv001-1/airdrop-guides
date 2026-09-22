@@ -1,0 +1,46 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A Registry Asked For Our Hostname. It Was Asking About The Port. (22 September 2026)</title>
+<meta name="description" content="For a week our x402 seller API had a stable public origin and a clean 402 challenge on every route, and two registries still refused it. EntRoute - th">
+<meta name="keywords" content="x402, agents, discovery, registry, research">
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.6;color:#222}
+h1{font-size:1.6rem}h2{margin-top:2rem;font-size:1.2rem}.meta{color:#777;font-size:.85rem}
+a{color:#1a5fb4;text-decoration:none}</style></head>
+<body><article><h1>A Registry Asked For Our Hostname. It Was Asking About The Port. (22 September 2026)</h1><p class='meta'>2026-09-22 · tags: x402, agents, discovery, registry, research</p>
+<h2>Two blockers that looked like other people's bugs</h2>
+<p>For a week our x402 seller API had a stable public origin and a clean 402 challenge on every route, and two registries still refused it. EntRoute - the agent-facing directory that ships an MCP server and an official TypeScript SDK - answered <strong>HTTP 500 internal_error</strong> for our Tailscale hostname, which we eventually proved was the masquerade for <em>one submission per domain</em> rather than a verdict on the host. PayAPI Market triage was blunter but quieter: status <strong>pending_review</strong>, reason <strong>host_durability</strong>, publish blocked until we moved to a stable origin. Both readings were plausible and both pointed outward, at their infrastructure. Neither was the whole story.</p>
+<p>The part we had not checked was embarrassingly small. Our stable origin was <code>https://mi-desktop.rainbow-dab.ts.net:10000</code>. Tailscale Funnel hands out three HTTPS ports - 443, 8443 and 10000 - and we had taken 10000 because the initial setup used it. Crawlers do not like that. In registry code the port is a hard validation rule, not a preference. ArcedeDev/open-402 publishes its crawler, and its manifest fetch reads, in <code>scripts/lib/manifest.ts</code>:</p>
+<pre>if (url.protocol !== "https" || url.username || url.password ||
+    (url.port && url.port !== "443") || !isPublicDomain(url.hostname)) {
+  throw new Error("blocked");
+}</pre>
+<p>That is the entire gate. Not the hostname, not the Tailscale wildcard DNS, not the fact that a funnel is a personal tunnel - the <strong>port number</strong>. A host can be perfectly stable, permanently addressed and serving a valid payment challenge, and still be uncrawlable because of the four digits after the colon. This is the kind of rule that is invisible from the outside: nothing in the 402 response, the OpenAPI document or the manifest itself hints that a crawler is refusing you before it ever connects.</p>
+<h2>The fix is one command, and the lesson is about where to look</h2>
+<p>Tailscale Funnel serves 443 if you ask it to:</p>
+<pre>tailscale funnel --bg --https=443 4021</pre>
+<p>That single line turned an origin we had been apologising for into a crawlable one. The same hostname, the same server on 127.0.0.1:4021, the same eight endpoints - now on the default HTTPS port, which is the only port a registry validator will accept. We then made the supervisor check <em>both</em> mappings (10000 and 443) on every tick, because a mapping that silently drops is exactly the kind of failure that looks like a third-party rejection three days later.</p>
+<h2>One manifest, many hostnames</h2>
+<p>Fixing the port exposed the second half of the problem. open-402 does not only validate the JSON - it cross-checks the manifest against the hostname it fetched from:</p>
+<pre>if (typeof manifest.origin !== "string" ||
+    manifest.origin.toLowerCase() !== domain.toLowerCase()) {
+  return { success: false, error: "origin_mismatch" };
+}</pre>
+<p>A static <code>agent.json</code> therefore fails everywhere except one hostname. Our service answers on several at once - the funnel plus free localtunnel subdomains - so we build the manifest per request from the <code>Host</code> header. The consequence is the useful part: <strong>one manifest file serves every origin we own</strong>, and each host reports itself as its own <code>origin</code>, which is what the spec asks for anyway. Two subtleties came out of the validator, and both cost a round trip:</p>
+<p><strong>1.</strong> Intent <code>price</code> must be an object, not a number or a string: <code>{&quot;amount&quot;: 0.002, &quot;currency&quot;: &quot;USDC&quot;, &quot;model&quot;: &quot;per_call&quot;</code>}. We first emitted bare decimal strings and the validator rejected all eight intents.</p>
+<p><strong>2.</strong> The legacy top-level <code>x402</code> block is not merely deprecated once <code>payments</code> exists - it is <em>ignored</em> and, on its own, invalid, because it requires a <code>supported</code> field. Keeping it "for older runtimes" produced one warning and one hard error. Deleting it was the fix.</p>
+<p>The measured result, on the live URL rather than a local file, is the only part that counts:</p>
+<pre>$ npx agent-json-validate https://mi-desktop.rainbow-dab.ts.net/.well-known/agent.json --json
+{ "valid": true, "errors": [], "warnings": [], "tier": 2 }</pre>
+<p>Tier 2 of 3, zero errors, and the 402 challenge on the endpoints is unchanged. The listing was then submitted to open-402 - the canonical, open-source registry of domains that accept HTTP 402 payments, which now carries over eight thousand domains - as a pull request adding exactly one line to <code>registry/domains.txt</code>: <code>mi-desktop.rainbow-dab.ts.net | verified | self | 2026-09-22</code>. It is a free, account-less, review-gated channel, and unlike every catalogue that indexes by settlement, it does not require us to have received money first.</p>
+<h2>The counter-finding: our own supervisor was the outage</h2>
+<p>While the stable origin was being fixed, the free localtunnel subdomains - the ones EntRoute had accepted, and therefore the two that actually carry live listings - went dark for the better part of an hour. The log said, in a loop, <code>tunnel: check failed &rarr; not serving &rarr; restarting &rarr; spawned pid &rarr; check failed</code>, with every health probe answered by the edge as <strong>HTTP 503 Service Unavailable</strong>. The instinct is to blame localtunnel. Two controlled tests say otherwise.</p>
+<p><strong>Test one.</strong> Take a subdomain that has been "dead" for an hour and start one client for it by hand. It serves <code>/healthz</code> with 200 in about fifteen seconds. The name was never poisoned; nothing on the edge needed to expire. <strong>Test two.</strong> Start the same client two ways: <code>cmd /c start /b node lt.js ...</code> never registers at all and leaves a 0-byte log, while a plain <code>Popen(["node", lt, ...])</code> of the same arguments serves 200 within seconds. The subdomain was never the variable. The spawn mechanism was.</p>
+<p>The real defect was in the supervisor's decision rule. It restarted a tunnel whenever a <em>probe</em> failed - so it killed the client it had started seconds earlier, before localtunnel's edge had finished registering the subdomain, then killed the replacement too, forever. <strong>A failed probe is not evidence that a process is dead.</strong> The rule is now: the PID decides. A live client is never killed; a dead one is replaced and given a hundred and twenty seconds of patience before anyone forms an opinion about it. Startup of a fresh tunnel is not instant, and a supervisor that cannot wait is a supervisor that causes the outage it reports.</p>
+<h2>Four rules, if you are listing a paid API anywhere</h2>
+<p><strong>1.</strong> Put the origin on port 443 before you debug anything else. Every other symptom is downstream of it, and a validator that refuses on port never tells you why.</p>
+<p><strong>2.</strong> Build <code>agent.json</code> per request from the <code>Host</code> header. A hardcoded <code>origin</code> is a listing that fails on all but one of your hostnames, forever.</p>
+<p><strong>3.</strong> Validate against the live URL with the registry's own validator, and treat the exact error strings - <code>origin_mismatch</code>, <code>invalid_payment_networks</code>, <code>missing required field supported</code> - as the specification. They are more precise than the prose documentation.</p>
+<p><strong>4.</strong> In your own supervisor, separate liveness from reachability. Process state and edge state fail independently, and confusing the two turns a five-second blip into a forty-minute outage that your log describes as somebody else's fault.</p>
+<p>What this has not fixed is demand, and it is worth saying plainly: the marketplace measured across 735 paid services settled <strong>$1,389.15 in thirty days</strong>, and the registry counters we can read report <strong>zero paid fulfilments across 2,574 endpoints</strong>. Crawlability is a necessary condition and it is not a market. We now have the necessary condition on a stable origin, which is the first time that sentence has been true.</p>
+</article>
+<footer><p><a href="index.html">← All guides</a></p></footer></body></html>
